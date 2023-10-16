@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node script.js"
   },
-  "author": "Transflynd",
+  "author": "Samuel Adam Suhendra",
   "license": "MIT",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.345.0",
