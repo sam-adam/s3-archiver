@@ -78,9 +78,12 @@ async function processManifest() {
         mkdirSync(dir);
       }
 
+      if (!archivedKeys.hasOwnProperty(patternStr)) {
+        archivedKeys[patternStr] = []
+      }
+
       console.log(`[${now()}] Pattern to match: ${patternStr}`);
     }
-
 
     // Step 2: Process each file in the manifest
     for (const { key: manifestKey } of manifest) {
@@ -106,10 +109,6 @@ async function processManifest() {
                   return;
                 }
 
-                if (!archivedKeys.hasOwnProperty(patternStr)) {
-                  archivedKeys[patternStr] = []
-                }
-
                 archivedKeys[patternStr].push({Key: fileKey});
               }
             }
@@ -124,7 +123,8 @@ async function processManifest() {
 
     await Promise.all(csvPromises);
 
-    for (const patternStr in Object.keys(archivedKeys)) {
+    for (const patternStr of Object.keys(archivedKeys)) {
+      const dir = patternStr.replace(/\//g, '_');
       const archiveFile = `${dir}/output-${patternStr.replace(/\//g, '_')}.zip`;
       const archive = archiver("zip", {zlib: { level: 9 }});
       const archiveStream = createWriteStream(archiveFile, { flags: "a", highWaterMark: 1024 * 1024 });
@@ -149,6 +149,7 @@ async function processManifest() {
         patternStr: patternStr
       });
 
+      console.log(patternStr, archivedKeys[patternStr]);
       console.log(`[${now()}][${patternStr}] Processing matched results: ` + archivedKeys[patternStr].length);
 
       for (const key of archivedKeys[patternStr]) {
@@ -217,7 +218,7 @@ async function processManifest() {
       }
     }
 
-    for (const patternStr in Object.keys(archivedKeys)) {
+    for (const patternStr of Object.keys(archivedKeys)) {
       // Step 7: Delete the archived objects
       console.log(`[${now()}][${patternStr}] Deleting ${archivedKeys[patternStr].length} archived keys from ${fileBucketName}`);
 
