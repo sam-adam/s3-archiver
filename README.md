@@ -4,6 +4,7 @@ Archive files in Amazon S3 to zip in parallel
 # License
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![NPM](https://badge.fury.io/js/@suhendra%2Fs3-zip.svg)](https://www.npmjs.com/package/@suhendra/s3-zip)
 
 ### Sample Command
 ```
