@@ -18,6 +18,22 @@ const patterns = patternsStr.map(p => new RegExp(p));
 const dryRun = process.env.DRY_RUN !== "false";
 const useLocalManifest = process.env.USE_LOCAL_MANIFEST === "true";
 
+function retry(times, callback) {
+  return new Promise(async (resolve, reject) => {
+    for (let i = 0; i < times; i++) {
+      try {
+        const result = await callback();
+
+        resolve(result);
+      } catch (error) {
+        if (i === times -1) {
+          reject(error)
+        }
+      }
+    }
+  });
+}
+
 function now() {
   return new Date().toDateString() + ' ' + new Date().toTimeString()
 }
@@ -149,7 +165,6 @@ async function processManifest() {
         patternStr: patternStr
       });
 
-      console.log(patternStr, archivedKeys[patternStr]);
       console.log(`[${now()}][${patternStr}] Processing matched results: ` + archivedKeys[patternStr].length);
 
       for (const key of archivedKeys[patternStr]) {
@@ -158,7 +173,7 @@ async function processManifest() {
 
         if (!existsSync(dir + '/' + fileName)) {
           const getFileParams = { Bucket: fileBucketName, Key: key.Key };
-          const fileData = await s3Client.send(new GetObjectCommand(getFileParams));
+          const fileData = await retry(3, async () => await s3Client.send(new GetObjectCommand(getFileParams)));
 
           await new Promise((resolve, reject) => {
             const fileWrite = createWriteStream(dir + '/' + fileName, { flags: 'a' })
