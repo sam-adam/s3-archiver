@@ -1,6 +1,10 @@
 # s3-archiver
 Archive files in Amazon S3 to zip in parallel
 
+# License
+
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
 ### Sample Command
 ```
 ACCESS_KEY=<s3-access-key>
