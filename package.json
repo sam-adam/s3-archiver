@@ -1,0 +1,18 @@
+{
+  "name": "s3-zip",
+  "version": "1.0.0",
+  "description": "Command to archive s3 files",
+  "main": "script.js",
+  "scripts": {
+    "start": "node script.js"
+  },
+  "author": "Transflynd",
+  "license": "MIT",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.345.0",
+    "archiver": "^5.3.0",
+    "csv-parser": "^3.0.0",
+    "fs": "^0.0.1-security",
+    "zlib": "^1.0.5"
+  }
+}
