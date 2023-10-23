@@ -18,16 +18,20 @@ const patterns = patternsStr.map(p => new RegExp(p));
 const dryRun = process.env.DRY_RUN !== "false";
 const useLocalManifest = process.env.USE_LOCAL_MANIFEST === "true";
 
-function retry(times, callback) {
+async function retry(times, callback) {
   return new Promise(async (resolve, reject) => {
     for (let i = 0; i < times; i++) {
       try {
         const result = await callback();
 
         resolve(result);
+
+        return;
       } catch (error) {
         if (i === times -1) {
-          reject(error)
+          reject(error);
+
+          return;
         }
       }
     }
@@ -167,13 +171,16 @@ async function processManifest() {
 
       console.log(`[${now()}][${patternStr}] Processing matched results: ` + archivedKeys[patternStr].length);
 
-      for (const key of archivedKeys[patternStr]) {
+      for (const idx in archivedKeys[patternStr]) {
+        const key = archivedKeys[patternStr][idx];
         const fileNameParts = key.Key.split('/');
         const fileName = fileNameParts[fileNameParts.length - 1];
 
         if (!existsSync(dir + '/' + fileName)) {
+          // console.log(`[${now()}][${patternStr}][${idx}] File not found, downloading: ` + dir + '/' + fileName);
+
           const getFileParams = { Bucket: fileBucketName, Key: key.Key };
-          const fileData = await retry(3, async () => await s3Client.send(new GetObjectCommand(getFileParams)));
+          const fileData = await retry(5, async () => await s3Client.send(new GetObjectCommand(getFileParams)));
 
           await new Promise((resolve, reject) => {
             const fileWrite = createWriteStream(dir + '/' + fileName, { flags: 'a' })
@@ -227,7 +234,7 @@ async function processManifest() {
 
         console.log(`[${now()}][${patternStr}] Archive uploaded successfully for ${archiveFile}`);
       } catch (err) {
-        console.error(`[${now()}][${patternStr}] Error uploading archive:`, err);
+        console.log(`[${now()}][${patternStr}] Error uploading archive:`, err);
 
         throw err;
       }
@@ -261,7 +268,7 @@ async function processManifest() {
             console.log(`[${now()}][${patternStr}] Deleted ${keys.length} keys`);
           }
         } catch (err) {
-          console.error(`[${now()}][${patternStr}] Error deleting archived keys:`, err);
+          console.log(`[${now()}][${patternStr}] Error deleting archived keys:`, err);
 
           throw err;
         }
@@ -275,14 +282,14 @@ async function processManifest() {
           try {
             rmSync(dir + '/' + fileName);
           } catch (err) {
-            // console.error('Failed to delete from local dir: ' + dir + '/' + fileName, err)
+            // console.log('Failed to delete from local dir: ' + dir + '/' + fileName, err)
           }
         }
       }
 
     }
   } catch (error) {
-    console.error("Error processing manifest:", error);
+    console.log("Error processing manifest:", error);
 
     throw error;
   }
