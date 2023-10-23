@@ -143,62 +143,73 @@ async function processManifest() {
 
     await Promise.all(csvPromises);
 
+    let perPatternPromises = [];
+
     for (const patternStr of Object.keys(archivedKeys)) {
-      const dir = patternStr.replace(/\//g, '_');
-      const archiveFile = `${dir}/output-${patternStr.replace(/\//g, '_')}.zip`;
-      const archive = archiver("zip", {zlib: { level: 9 }});
-      const archiveStream = createWriteStream(archiveFile, { flags: "a", highWaterMark: 1024 * 1024 });
+      perPatternPromises.push(new Promise(async () => {
+        const dir = patternStr.replace(/\//g, '_');
+        const archiveFile = `${dir}/output-${patternStr.replace(/\//g, '_')}.zip`;
+        const archive = archiver("zip", {zlib: { level: 9 }});
+        const archiveStream = createWriteStream(archiveFile, { flags: "a", highWaterMark: 1024 * 1024 });
 
-      archive.pipe(archiveStream);
-      archive.on('progress', (data) => {
-        processedCount = data.entries.processed;
+        archive.pipe(archiveStream);
+        archive.on('progress', (data) => {
+          processedCount = data.entries.processed;
 
-        console.log(`[${now()}][${patternStr}] Archive progress: ` + processedCount + '/' + archivedKeys[patternStr].length);
-      });
-      archive.on('finish', () => {
-        console.log(`[${now()}][${patternStr}] Total archived: "` + patternStr + '" - ' + processedCount + '/' + archivedKeys[patternStr].length);
+          console.log(`[${now()}][${patternStr}] Archive progress: ` + processedCount + '/' + archivedKeys[patternStr].length);
+        });
+        archive.on('finish', () => {
+          console.log(`[${now()}][${patternStr}] Total archived: "` + patternStr + '" - ' + processedCount + '/' + archivedKeys[patternStr].length);
 
-        if (processedCount !== archivedKeys[patternStr].length) {
-          throw new Error('Mismatch processed archived vs planned: ' + processedCount + ' vs ' + archivedKeys[patternStr].length);
+          if (processedCount !== archivedKeys[patternStr].length) {
+            throw new Error('Mismatch processed archived vs planned: ' + processedCount + ' vs ' + archivedKeys[patternStr].length);
+          }
+        });
+
+        archives.push({
+          archive: archive,
+          archiveFile: archiveFile,
+          patternStr: patternStr
+        });
+
+        console.log(`[${now()}][${patternStr}] Processing matched results: ` + archivedKeys[patternStr].length);
+
+        for (const idx in archivedKeys[patternStr]) {
+          const key = archivedKeys[patternStr][idx];
+          const fileNameParts = key.Key.split('/');
+          const fileName = fileNameParts[fileNameParts.length - 1];
+
+          if (!existsSync(dir + '/' + fileName)) {
+            const getFileParams = { Bucket: fileBucketName, Key: key.Key };
+
+            retry(5, () => s3Client.send(new GetObjectCommand(getFileParams)))
+              .then((fileData) => {
+                return new Promise((resolve, reject) => {
+                  const fileWrite = createWriteStream(dir + '/' + fileName, {flags: 'a'})
+                    .on('error', (err) => reject(err))
+                    .on('finish', () => resolve());
+
+                  fileData.Body.pipe(fileWrite);
+                }).then(() => {
+                  archivePromises.push(new Promise((resolve) => {
+                    archive.file(dir + '/' + fileName, {name: fileName});
+
+                    resolve();
+                  }));
+                });
+              });
+          } else {
+            archivePromises.push(new Promise((resolve) => {
+              archive.file(dir + '/' + fileName, { name: fileName });
+
+              resolve();
+            }));
+          }
         }
-      });
-
-      archives.push({
-        archive: archive,
-        archiveFile: archiveFile,
-        patternStr: patternStr
-      });
-
-      console.log(`[${now()}][${patternStr}] Processing matched results: ` + archivedKeys[patternStr].length);
-
-      for (const idx in archivedKeys[patternStr]) {
-        const key = archivedKeys[patternStr][idx];
-        const fileNameParts = key.Key.split('/');
-        const fileName = fileNameParts[fileNameParts.length - 1];
-
-        if (!existsSync(dir + '/' + fileName)) {
-          // console.log(`[${now()}][${patternStr}][${idx}] File not found, downloading: ` + dir + '/' + fileName);
-
-          const getFileParams = { Bucket: fileBucketName, Key: key.Key };
-          const fileData = await retry(5, async () => await s3Client.send(new GetObjectCommand(getFileParams)));
-
-          await new Promise((resolve, reject) => {
-            const fileWrite = createWriteStream(dir + '/' + fileName, { flags: 'a' })
-              .on('error', (err) => reject(err))
-              .on('finish', () => resolve());
-
-            fileData.Body.pipe(fileWrite)
-          })
-        }
-
-        archivePromises.push(new Promise((resolve) => {
-          archive.file(dir + '/' + fileName, { name: fileName });
-
-          resolve();
-        }));
-      }
+      }));
     }
 
+    await Promise.all(perPatternPromises);
     await Promise.all(archivePromises);
 
     for (const { archive } of archives) {
