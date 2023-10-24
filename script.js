@@ -3,6 +3,7 @@ const { mkdirSync, existsSync, createReadStream, createWriteStream, rmSync } = r
 const archiver = require("archiver");
 const zlib = require("zlib");
 const csv = require("csv-parser");
+const cliProgress = require('cli-progress');
 
 // Set your AWS region and credentials
 const region = process.env.REGION;
@@ -18,16 +19,34 @@ const patterns = patternsStr.map(p => new RegExp(p));
 const dryRun = process.env.DRY_RUN !== "false";
 const useLocalManifest = process.env.USE_LOCAL_MANIFEST === "true";
 
-function retry(times, callback) {
+function getDateDuration(startDate, endDate) {
+  const duration = Math.abs(endDate - startDate); // Get the time difference in milliseconds
+
+  const millisecondsInSecond = 1000;
+  const millisecondsInMinute = millisecondsInSecond * 60;
+  const millisecondsInHour = millisecondsInMinute * 60;
+
+  const hours = Math.floor(duration / millisecondsInHour);
+  const minutes = Math.floor((duration % millisecondsInHour) / millisecondsInMinute);
+  const seconds = Math.floor((duration % millisecondsInMinute) / millisecondsInSecond);
+
+  return [hours, minutes, seconds];
+}
+
+async function retry(times, callback) {
   return new Promise(async (resolve, reject) => {
     for (let i = 0; i < times; i++) {
       try {
         const result = await callback();
 
         resolve(result);
+
+        return;
       } catch (error) {
         if (i === times -1) {
-          reject(error)
+          reject(error);
+
+          return;
         }
       }
     }
@@ -39,6 +58,13 @@ function now() {
 }
 
 async function processManifest() {
+  // create new container
+  const multibar = new cliProgress.MultiBar({
+    clearOnComplete: false,
+    hideCursor: true,
+    format: '{bar} | {elapsed} | {filename} | {value}/{total}',
+  }, cliProgress.Presets.shades_grey);
+
   try {
     // Initialize the S3 clients
     const s3Client = new S3Client({ region, credentials: { accessKeyId, secretAccessKey } });
@@ -81,7 +107,6 @@ async function processManifest() {
     }
 
     let archives = [];
-    let archivePromises = [];
     let csvPromises = [];
     let archivedKeys = {};
     let processedCount = 0;
@@ -139,64 +164,73 @@ async function processManifest() {
 
     await Promise.all(csvPromises);
 
+    let perPatternPromises = [];
+
     for (const patternStr of Object.keys(archivedKeys)) {
-      const dir = patternStr.replace(/\//g, '_');
-      const archiveFile = `${dir}/output-${patternStr.replace(/\//g, '_')}.zip`;
-      const archive = archiver("zip", {zlib: { level: 9 }});
-      const archiveStream = createWriteStream(archiveFile, { flags: "a", highWaterMark: 1024 * 1024 });
+      perPatternPromises.push(new Promise(async (resolve, reject) => {
+        const dir = patternStr.replace(/\//g, '_');
+        const archiveFile = `${dir}/output-${patternStr.replace(/\//g, '_')}.zip`;
+        const archive = archiver("zip", {zlib: { level: 9 }});
+        const archiveStream = createWriteStream(archiveFile, { flags: "a", highWaterMark: 1024 * 1024 });
+        const bar = multibar.create(archivedKeys[patternStr].length, 0);
+        const start = new Date();
 
-      archive.pipe(archiveStream);
-      archive.on('progress', (data) => {
-        processedCount = data.entries.processed;
+        bar.update(null, {filename: patternStr, elapsed: 0});
 
-        console.log(`[${now()}][${patternStr}] Archive progress: ` + processedCount + '/' + archivedKeys[patternStr].length);
-      });
-      archive.on('finish', () => {
-        console.log(`[${now()}][${patternStr}] Total archived: "` + patternStr + '" - ' + processedCount + '/' + archivedKeys[patternStr].length);
+        archive.pipe(archiveStream);
+        archive.on('progress', (data) => {
+          processedCount = data.entries.processed;
 
-        if (processedCount !== archivedKeys[patternStr].length) {
-          throw new Error('Mismatch processed archived vs planned: ' + processedCount + ' vs ' + archivedKeys[patternStr].length);
-        }
-      });
+          const elapsedTime = getDateDuration(start, new Date());
 
-      archives.push({
-        archive: archive,
-        archiveFile: archiveFile,
-        patternStr: patternStr
-      });
+          bar.update(processedCount, {filename: patternStr, elapsed: `Duration: ${elapsedTime[0]}h ${elapsedTime[1]}m ${elapsedTime[2]}s`});
 
-      console.log(`[${now()}][${patternStr}] Processing matched results: ` + archivedKeys[patternStr].length);
+          if (processedCount === archivedKeys[patternStr].length) {
+            console.log(`[${now()}][${patternStr}] Finalizing zip.`);
 
-      for (const key of archivedKeys[patternStr]) {
-        const fileNameParts = key.Key.split('/');
-        const fileName = fileNameParts[fileNameParts.length - 1];
+            archive.finalize();
+          }
+        });
+        archive.on('finish', () => {
+          console.log(`[${now()}][${patternStr}] Total archived: ${processedCount}/${archivedKeys[patternStr].length}`);
 
-        if (!existsSync(dir + '/' + fileName)) {
-          const getFileParams = { Bucket: fileBucketName, Key: key.Key };
-          const fileData = await retry(3, async () => await s3Client.send(new GetObjectCommand(getFileParams)));
+          if (processedCount !== archivedKeys[patternStr].length) {
+            reject(new Error('Mismatch processed archived vs planned: ' + processedCount + ' vs ' + archivedKeys[patternStr].length));
+          } else {
+            resolve();
+          }
+        });
 
-          await new Promise((resolve, reject) => {
-            const fileWrite = createWriteStream(dir + '/' + fileName, { flags: 'a' })
+        archives.push({
+          archive: archive,
+          archiveFile: archiveFile,
+          patternStr: patternStr
+        });
+
+        console.log(`[${now()}][${patternStr}] Processing matched results: ` + archivedKeys[patternStr].length);
+
+        for (const idx in archivedKeys[patternStr]) {
+          const key = archivedKeys[patternStr][idx];
+          const fileNameParts = key.Key.split('/');
+          const fileName = fileNameParts[fileNameParts.length - 1];
+
+          if (!existsSync(dir + '/' + fileName)) {
+            const getFileParams = { Bucket: fileBucketName, Key: key.Key };
+
+            const fileData = await retry(5, () => s3Client.send(new GetObjectCommand(getFileParams)));
+            const fileWrite = createWriteStream(dir + '/' + fileName, {flags: 'a'})
               .on('error', (err) => reject(err))
               .on('finish', () => resolve());
 
-            fileData.Body.pipe(fileWrite)
-          })
+            await fileData.Body.pipe(fileWrite);
+          }
+
+          archive.file(dir + '/' + fileName, {name: fileName});
         }
-
-        archivePromises.push(new Promise((resolve) => {
-          archive.file(dir + '/' + fileName, { name: fileName });
-
-          resolve();
-        }));
-      }
+      }));
     }
 
-    await Promise.all(archivePromises);
-
-    for (const { archive } of archives) {
-      archive.finalize();
-    }
+    await Promise.all(perPatternPromises);
 
     console.log(`[${now()}] Manifest processing completed.`);
 
@@ -227,7 +261,7 @@ async function processManifest() {
 
         console.log(`[${now()}][${patternStr}] Archive uploaded successfully for ${archiveFile}`);
       } catch (err) {
-        console.error(`[${now()}][${patternStr}] Error uploading archive:`, err);
+        console.log(`[${now()}][${patternStr}] Error uploading archive:`, err);
 
         throw err;
       }
@@ -261,28 +295,28 @@ async function processManifest() {
             console.log(`[${now()}][${patternStr}] Deleted ${keys.length} keys`);
           }
         } catch (err) {
-          console.error(`[${now()}][${patternStr}] Error deleting archived keys:`, err);
+          console.log(`[${now()}][${patternStr}] Error deleting archived keys:`, err);
 
           throw err;
         }
 
         console.log(`[${now()}][${patternStr}] Deleting local files`);
 
-        for (const key of archivedKeys) {
+        for (const key of archivedKeys[patternStr]) {
           const fileNameParts = key.Key.split('/');
           const fileName = fileNameParts[fileNameParts.length - 1];
 
           try {
             rmSync(dir + '/' + fileName);
           } catch (err) {
-            // console.error('Failed to delete from local dir: ' + dir + '/' + fileName, err)
+            // console.log('Failed to delete from local dir: ' + dir + '/' + fileName, err)
           }
         }
       }
 
     }
   } catch (error) {
-    console.error("Error processing manifest:", error);
+    console.log("Error processing manifest:", error);
 
     throw error;
   }
@@ -290,3 +324,4 @@ async function processManifest() {
 
 // Run the script
 processManifest();
+
