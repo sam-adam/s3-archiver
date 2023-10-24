@@ -1,6 +1,6 @@
 {
-  "name": "s3-zip",
-  "version": "1.0.0",
+  "name": "@suhendra/s3-zip",
+  "version": "1.0.1",
   "description": "Command to archive s3 files",
   "main": "script.js",
   "scripts": {
@@ -12,7 +12,22 @@
     "@aws-sdk/client-s3": "^3.345.0",
     "archiver": "^5.3.0",
     "csv-parser": "^3.0.0",
+    "cli-progress": "^3.12.0",
     "fs": "^0.0.1-security",
     "zlib": "^1.0.5"
-  }
+  },
+  "devDependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/sam-adam/s3-zip.git"
+  },
+  "keywords": [
+    "s3",
+    "archive",
+    "nodejs"
+  ],
+  "bugs": {
+    "url": "https://github.com/sam-adam/s3-zip/issues"
+  },
+  "homepage": "https://github.com/sam-adam/s3-zip#readme"
 }
