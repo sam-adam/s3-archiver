@@ -1,10 +1,12 @@
 # s3-archiver
-Very fast files archive in Amazon S3 to zip in parallel
+Fast files archive in Amazon S3 to zip in parallel
 
 # License
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![NPM](https://badge.fury.io/js/@suhendra%2Fs3-zip.svg)](https://www.npmjs.com/package/@suhendra/s3-zip)
+
+![image](https://github.com/sam-adam/s3-zip/assets/2836541/0a0bc750-ac21-440c-8099-008b15f62c1f)
 
 ### Sample Command
 ```
