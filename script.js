@@ -109,7 +109,6 @@ async function processManifest() {
     let archives = [];
     let csvPromises = [];
     let archivedKeys = {};
-    let processedCount = 0;
 
     // Make sure directory for local download exists
     for (let patternStr of patternsStr) {
@@ -168,6 +167,7 @@ async function processManifest() {
 
     for (const patternStr of Object.keys(archivedKeys)) {
       perPatternPromises.push(new Promise(async (resolve, reject) => {
+        let processedCount = 0;
         const dir = patternStr.replace(/\//g, '_');
         const archiveFile = `${dir}/output-${patternStr.replace(/\//g, '_')}.zip`;
         const archive = archiver("zip", {zlib: { level: 9 }});
@@ -271,6 +271,7 @@ async function processManifest() {
       // Step 7: Delete the archived objects
       console.log(`[${now()}][${patternStr}] Deleting ${archivedKeys[patternStr].length} archived keys from ${fileBucketName}`);
 
+      const dir = patternStr.replace(/\//g, '_');
       const size = 1000;
       const chunkedKeys = [];
 
@@ -324,4 +325,3 @@ async function processManifest() {
 
 // Run the script
 processManifest();
-
